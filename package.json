@@ -1,0 +1,37 @@
+{
+  "name": "nai-act",
+  "version": "0.1.0",
+  "description": "A minimal reactive retained-UI framework for NovelAI Scripting",
+  "type": "module",
+  "main": "./src/nai-act.ts",
+  "types": "./src/nai-act.ts",
+  "exports": {
+    ".": {
+      "types": "./src/nai-act.ts",
+      "default": "./src/nai-act.ts"
+    }
+  },
+  "files": [
+    "src/nai-act.ts",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "novelai",
+    "ui",
+    "component",
+    "scripting"
+  ],
+  "author": "keilladraconis",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/keilladraconis/NAI-act.git"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
