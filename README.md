@@ -8,6 +8,26 @@ NAIAct exists to solve one problem well:
 
 NAIAct borrows ideas from React and Redux, but it is **not a React clone**. There is no virtual DOM, no render loop, and no reconciliation. Instead, NAIAct uses a build-once model where components create their UI structure and bind dynamic behavior in a single pass.
 
+## Installation
+
+### Method A: Copy-paste (simplest)
+
+Copy `src/nai-act.ts` directly into your NovelAI Script project.
+
+### Method B: npm + nibs
+
+If your project uses [nibs](https://github.com/LaneRendell/NovelAI_Script_BuildSystem) or another bundler that resolves `node_modules`:
+
+```bash
+npm install nai-act
+```
+
+```ts
+import { defineComponent, mount, mergeStyles } from "nai-act";
+```
+
+> **Note:** This package distributes raw TypeScript source — no compilation step is needed. Your bundler must support `.ts` imports.
+
 ---
 
 ## The Core Mental Model
