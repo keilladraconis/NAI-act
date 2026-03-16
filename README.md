@@ -56,18 +56,10 @@ const MyComponent = defineComponent({
 
   // Build: create structure and bind behavior
   build(props, ctx) {
-    // Bind dynamic behavior
-    ctx.useSelector(
-      (s) => s.label,
-      (label) => {
-        api.v1.ui.updateParts([{ id: this.id(props), text: label }]);
-      },
-    );
-
-    // Return static UI structure
     return api.v1.ui.part.text({
       id: this.id(props),
-      text: props.label,
+      // bindPart reads initial state and subscribes for updates in one call
+      ...ctx.bindPart(this.id(props), (s) => s.label, (label) => ({ text: label })),
     });
   },
 });
@@ -93,20 +85,12 @@ const Counter = defineComponent({
   },
 
   build(_, ctx) {
-    const count = ctx.getState().counter;
-
-    // Subscribe to state changes to update the UI
-    ctx.useSelector(
-      (s) => s.counter,
-      (count) => {
-        api.v1.ui.updateParts([{ id: this.id(), text: `Count: ${count}` }]);
-      },
-    );
-
-    // Return initial UI structure with callback
     return api.v1.ui.part.button({
       id: this.id(),
-      text: `Count: ${count}`,
+      // bindPart reads initial state and subscribes for updates — one path, no divergence
+      ...ctx.bindPart(this.id(), (s) => s.counter, (count) => ({
+        text: `Count: ${count}`,
+      })),
       callback: () => ctx.dispatch({ type: "INC" }),
     });
   },
@@ -194,8 +178,6 @@ const TodoItem = defineComponent({
 
 ### Parent Component: `TodoList`
 
-This component manages the lifecycle of its children manually because the list is dynamic.
-
 ```typescript
 const TodoList = defineComponent({
   id() {
@@ -203,46 +185,14 @@ const TodoList = defineComponent({
   },
 
   build(_, ctx: BindContext<State>) {
-    // Track rendered children for reconciliation
-    const rendered = new Map<string, { part: UIPart; unmount: () => void }>();
-
-    // Render existing children from current state
-    const initialIds = ctx.getState().todos.map((t) => t.id);
-    for (const id of initialIds) {
-      rendered.set(id, ctx.render(TodoItem, { id }));
-    }
-
-    ctx.useSelector(
-      (s: State) => s.todos.map((t) => t.id),
-      (ids) => {
-        // 1. Render new children
-        for (const id of ids) {
-          if (!rendered.has(id)) {
-            rendered.set(id, ctx.render(TodoItem, { id }));
-          }
-        }
-
-        // 2. Cleanup removed children
-        for (const [id, { unmount }] of rendered) {
-          if (!ids.includes(id)) {
-            unmount();
-            rendered.delete(id);
-          }
-        }
-
-        // 3. Update structure with rendered parts
-        api.v1.ui.updateParts([
-          {
-            id: this.id(undefined),
-            content: ids.map((id) => rendered.get(id)!.part),
-          },
-        ]);
-      },
-    );
-
     return api.v1.ui.part.column({
       id: this.id(undefined),
-      content: initialIds.map((id) => rendered.get(id)!.part),
+      content: ctx.bindList(
+        this.id(undefined),
+        (s) => s.todos,
+        (todo) => todo.id,
+        (todo) => ({ component: TodoItem, props: { id: todo.id } }),
+      ),
     });
   },
 });
@@ -316,24 +266,15 @@ const TodoItem = defineComponent({
   },
 
   build(props, ctx) {
-    ctx.useSelector(
-      (s) => s.todos.find(t => t.id === props.id).done,
-      (isDone) => {
-        api.v1.ui.updateParts([
-          {
-            id: this.id(props),
-            // Merges "base" with "done" (if isDone is true)
-            style: this.style?.("base", isDone && "done")
-          }
-        ]);
-      }
-    );
-
     return api.v1.ui.part.box({
       id: this.id(props),
-      // Apply base style
-      style: this.styles?.base,
-      content: []
+      content: [],
+      // bindPart handles initial style and subscribes for updates in one call
+      ...ctx.bindPart(
+        this.id(props),
+        (s) => s.todos.find(t => t.id === props.id).done,
+        (isDone) => ({ style: this.style?.("base", isDone && "done") }),
+      ),
     });
   }
 });
@@ -389,6 +330,8 @@ Merges multiple style objects into one. Later styles override earlier ones. Fals
 ### `BindContext` (Passed to `build`)
 - `getState()`: Get current state.
 - `dispatch(action)`: Dispatch an action.
-- `useSelector(selector, listener)`: Subscribe to state changes. Auto-cleaned up on unmount.
+- `useSelector(selector, listener)`: Subscribe to state changes. Auto-cleaned up on unmount. Use this for non-UIPart side effects (e.g. syncing to `api.v1.memory`).
 - `useEffect(predicate, effect)`: Subscribe to actions (side-effects). Auto-cleaned up on unmount.
 - `render(Component, Props)`: Render a child component. Returns `{ part: UIPart, unmount: () => void }`. Auto-cleaned up on parent unmount.
+- `bindPart(partId, selector, mapper)`: Binds a UIPart property to state. Reads current state to return initial props (spread into the UIPart definition), and subscribes to call `updateParts` on every subsequent change. Eliminates the two-path `getState()` + `useSelector` + `updateParts` pattern.
+- `bindList(containerId, selector, keyFn, renderItem)`: Manages a dynamic list of child components. Returns the initial `UIPart[]` for use in `build()`, and reconciles additions/removals on state changes, updating the container via `updateParts`. Auto-cleaned up on unmount.

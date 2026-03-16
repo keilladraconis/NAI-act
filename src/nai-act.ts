@@ -1,5 +1,5 @@
 /*
- NAIAct - [0.1.0]
+ NAIAct - [0.2.0]
 */
 
 // --------------------------------------------------
@@ -39,6 +39,17 @@ export interface BindContext<S> {
     ) => void,
   ): () => void;
   render<P>(component: Component<P, S>, props: P): { part: UIPart; unmount: () => void };
+  bindPart<T>(
+    partId: string,
+    selector: (state: S) => T,
+    mapper: (value: T) => Record<string, any>,
+  ): Record<string, any>;
+  bindList<T>(
+    containerId: string,
+    selector: (state: S) => T[],
+    keyFn: (item: T) => string,
+    renderItem: (item: T) => { component: Component<any, S>; props: any },
+  ): UIPart[];
 }
 
 // --------------------------------------------------
@@ -144,6 +155,57 @@ export function mount<P, S>(
       const result = mount(child, childProps, store);
       const unmount = addCleanup(result.unmount);
       return { part: result.part, unmount };
+    },
+
+    bindPart(partId, selector, mapper) {
+      const initial = selector(store.getState());
+      const unsub = store.subscribeSelector(selector, (value) => {
+        api.v1.ui.updateParts([{ id: partId, ...mapper(value) }]);
+      });
+      addCleanup(unsub);
+      return mapper(initial);
+    },
+
+    bindList(containerId, selector, keyFn, renderItem) {
+      const rendered = new Map<string, { part: UIPart; unmount: () => void }>();
+
+      const initialItems = selector(store.getState());
+      for (const item of initialItems) {
+        const spec = renderItem(item);
+        rendered.set(keyFn(item), mount(spec.component, spec.props, store));
+      }
+
+      const unsub = store.subscribeSelector(
+        (state) => selector(state).map(keyFn),
+        (keys) => {
+          const currentItems = selector(store.getState());
+          const itemsByKey = new Map(currentItems.map((i) => [keyFn(i), i]));
+
+          for (const key of keys) {
+            if (!rendered.has(key)) {
+              const item = itemsByKey.get(key)!;
+              const spec = renderItem(item);
+              rendered.set(key, mount(spec.component, spec.props, store));
+            }
+          }
+
+          const keySet = new Set(keys);
+          for (const [key, entry] of rendered) {
+            if (!keySet.has(key)) {
+              entry.unmount();
+              rendered.delete(key);
+            }
+          }
+
+          api.v1.ui.updateParts([{
+            id: containerId,
+            content: keys.map((k) => rendered.get(k)!.part),
+          }]);
+        },
+      );
+      addCleanup(unsub);
+
+      return initialItems.map((item) => rendered.get(keyFn(item))!.part);
     },
   };
 
