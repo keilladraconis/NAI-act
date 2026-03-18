@@ -14,6 +14,7 @@ export interface StoreLike<S> {
   subscribeSelector<T>(
     selector: (state: S) => T,
     listener: (value: T) => void,
+    equals?: (a: T, b: T) => boolean,
   ): () => void;
   subscribeEffect(
     when: (action: ActionLike) => boolean,
@@ -30,6 +31,7 @@ export interface BindContext<S> {
   useSelector<T>(
     selector: (state: S) => T,
     listener: (value: T) => void,
+    equals?: (a: T, b: T) => boolean,
   ): () => void;
   useEffect(
     when: (action: ActionLike) => boolean,
@@ -141,8 +143,8 @@ export function mount<P, S>(
     getState: store.getState.bind(store),
     dispatch: store.dispatch.bind(store),
 
-    useSelector(selector, listener) {
-      const unsub = store.subscribeSelector(selector, listener);
+    useSelector(selector, listener, equals) {
+      const unsub = store.subscribeSelector(selector, listener, equals);
       return addCleanup(unsub);
     },
 
@@ -169,41 +171,42 @@ export function mount<P, S>(
     bindList(containerId, selector, keyFn, renderItem) {
       const rendered = new Map<string, { part: UIPart; unmount: () => void }>();
 
-      const initialItems = selector(store.getState());
-      for (const item of initialItems) {
-        const spec = renderItem(item);
-        rendered.set(keyFn(item), mount(spec.component, spec.props, store));
-      }
+      // Unmount all existing items and remount fresh from current state.
+      // This is necessary because updating a container's content re-applies all child
+      // part specs from their original build()-time definitions, overwriting any
+      // subsequent updateParts calls to those children. By remounting on every structural
+      // change, build() always runs with current-state props and initial content is correct.
+      const remountAll = () => {
+        const items = selector(store.getState());
+        for (const entry of rendered.values()) entry.unmount();
+        rendered.clear();
+        for (const item of items) {
+          const spec = renderItem(item);
+          rendered.set(keyFn(item), mount(spec.component, spec.props, store));
+        }
+        return items;
+      };
 
+      const initialItems = remountAll();
+
+      // Use array-equality comparison so the listener only fires when key values
+      // actually change — not on every action due to .map() creating new array refs.
       const unsub = store.subscribeSelector(
         (state) => selector(state).map(keyFn),
-        (keys) => {
-          const currentItems = selector(store.getState());
-          const itemsByKey = new Map(currentItems.map((i) => [keyFn(i), i]));
-
-          for (const key of keys) {
-            if (!rendered.has(key)) {
-              const item = itemsByKey.get(key)!;
-              const spec = renderItem(item);
-              rendered.set(key, mount(spec.component, spec.props, store));
-            }
-          }
-
-          const keySet = new Set(keys);
-          for (const [key, entry] of rendered) {
-            if (!keySet.has(key)) {
-              entry.unmount();
-              rendered.delete(key);
-            }
-          }
-
+        (_keys) => {
+          const items = remountAll();
           api.v1.ui.updateParts([{
             id: containerId,
-            content: keys.map((k) => rendered.get(k)!.part),
+            content: items.map((item) => rendered.get(keyFn(item))!.part),
           }]);
         },
+        (a, b) => a.length === b.length && a.every((k, i) => k === b[i]),
       );
       addCleanup(unsub);
+      addCleanup(() => {
+        for (const entry of rendered.values()) entry.unmount();
+        rendered.clear();
+      });
 
       return initialItems.map((item) => rendered.get(keyFn(item))!.part);
     },
